@@ -29,14 +29,14 @@ def get_backend():
 
 
 def load_volfile(
-        filename,
-        np_var='vol',
-        add_batch_axis=False,
-        add_feat_axis=False,
-        pad_shape=None,
-        resize_factor=1,
-        ret_affine=False
-    ):
+    filename,
+    np_var='vol',
+    add_batch_axis=False,
+    add_feat_axis=False,
+    pad_shape=None,
+    resize_factor=1,
+    ret_affine=False
+):
     """
     Loads a file in nii, nii.gz, mgz, npz, or npy format.
 
@@ -93,10 +93,10 @@ def save_volfile(array, filename, affine=None):
         import nibabel as nib
         if affine is None and array.ndim >= 3:
             # use LIA transform as default affine
-            affine = np.array([[-1,  0,  0,  0],
-                               [ 0,  0,  1,  0],
-                               [ 0, -1,  0,  0],
-                               [ 0,  0,  0,  1]], dtype=float)
+            affine = np.array([[-1, 0, 0, 0],  # nopep8
+                               [0, 0, 1, 0],  # nopep8
+                               [0, -1, 0, 0],  # nopep8
+                               [0, 0, 0, 1]], dtype=float)  # nopep8
             pcrs = np.append(np.array(array.shape[:3]) / 2, 1)
             affine[:3, 3] = -np.matmul(affine, pcrs)[:3]
         nib.save(nib.Nifti1Image(array, affine), filename)
@@ -104,6 +104,43 @@ def save_volfile(array, filename, affine=None):
         np.savez_compressed(filename, vol=array)
     else:
         raise ValueError('unknown filetype for %s' % filename)
+
+
+def load_labels(arg):
+    """
+    Load label maps and return a list of unique labels as well as all maps.
+
+    Parameters:
+        arg: Path to folder containing label maps or string for globbing.
+
+    Returns:
+        np.array: List of unique labels.
+        list: List of label maps, each as a np.array.
+    """
+    # List files.
+    import glob
+    if os.path.isdir(arg):
+        ext = ('*.nii.gz', '*.nii', '*.mgz', '*.npy', '*.npz')
+        files = sum((glob.glob(os.path.join(arg, x)) for x in ext), [])
+    else:
+        files = glob.glob(arg)
+
+    # Load labels.
+    if len(files) == 0:
+        raise ValueError(f'no labels found for argument "{files}"')
+    label_maps = []
+    shape = None
+    for f in files:
+        x = np.squeeze(load_volfile(f))
+        if shape is None:
+            shape = x.shape
+        if not np.issubdtype(x.dtype, np.integer):
+            raise ValueError(f'file "{f}" has non-integral data type')
+        if not np.all(x.shape == shape):
+            raise ValueError(f'shape {x.shape} of file "{f}" is not {shape}')
+        label_maps.append(x)
+
+    return np.unique(label_maps), label_maps
 
 
 def load_pheno_csv(filename, training_files=None):
@@ -178,13 +215,21 @@ def dice(array1, array2, labels):
     return dicem
 
 
-def affine_shift_to_matrix(trf, resize=None):
+def affine_shift_to_matrix(trf, resize=None, unshift_shape=None):
     """
     Converts an affine shift to a matrix (over the identity).
+    To convert back from center-shifted transform, provide image shape
+    to unshift_shape.
+
+    TODO: make ND compatible - currently just 3D
     """
     matrix = np.concatenate([trf.reshape((3, 4)), np.zeros((1, 4))], 0) + np.eye(4)
     if resize is not None:
         matrix[:3, -1] *= resize
+    if unshift_shape is not None:
+        T = np.zeros((4, 4))
+        T[:3, 3] = (np.array(unshift_shape) - 1) / 2
+        matrix = (np.eye(4) + T) @ matrix @ (np.eye(4) - T)
     return matrix
 
 
@@ -229,7 +274,7 @@ def clean_seg_batch(X_label, std=1):
 
     data = np.zeros(X_label.shape)
     for xi, x in enumerate(X_label):
-        data[xi,...,0] = clean_seg(x[...,0], std)
+        data[xi, ..., 0] = clean_seg(x[..., 0], std)
 
     return data
 
@@ -279,16 +324,16 @@ def vol_to_sdt(X_label, sdt=True, sdt_vol_resize=1):
     """
 
     X_dt = signed_dist_trf(X_label)
-    
+
     if not (sdt_vol_resize == 1):
         if not isinstance(sdt_vol_resize, (list, tuple)):
             sdt_vol_resize = [sdt_vol_resize] * X_dt.ndim
         if any([f != 1 for f in sdt_vol_resize]):
             X_dt = scipy.ndimage.interpolation.zoom(X_dt, sdt_vol_resize, order=1, mode='reflect')
-    
+
     if not sdt:
         X_dt = np.abs(X_dt)
-    
+
     return X_dt
 
 
@@ -299,8 +344,9 @@ def vol_to_sdt_batch(X_label, sdt=True, sdt_vol_resize=1):
 
     # assume X_label is [batch_size, *vol_shape, 1]
     assert X_label.shape[-1] == 1, 'implemented assuming size is [batch_size, *vol_shape, 1]'
-    X_lst = [f[...,0] for f in X_label]  # get rows
-    X_dt_lst = [vol_to_sdt(f, sdt=sdt, sdt_vol_resize=sdt_vol_resize) for f in X_lst]  # distance transform
+    X_lst = [f[..., 0] for f in X_label]  # get rows
+    X_dt_lst = [vol_to_sdt(f, sdt=sdt, sdt_vol_resize=sdt_vol_resize)
+                for f in X_lst]  # distance transform
     X_dt = np.stack(X_dt_lst, 0)[..., np.newaxis]
     return X_dt
 
@@ -321,33 +367,35 @@ def edge_to_surface_pts(X_edges, nb_surface_pts=None):
 
     # assumes X_edges is NOT in keras form
     surface_pts = np.stack(np.where(X_edges), 0).transpose()
-    
+
     # random with replacements
     if nb_surface_pts is not None:
         chi = np.random.choice(range(surface_pts.shape[0]), size=nb_surface_pts)
-        surface_pts = surface_pts[chi,:]
+        surface_pts = surface_pts[chi, :]
 
     return surface_pts
 
 
-def sdt_to_surface_pts(X_sdt, nb_surface_pts, surface_pts_upsample_factor=2, thr=0.50001, resize_fn=None):
+def sdt_to_surface_pts(X_sdt, nb_surface_pts,
+                       surface_pts_upsample_factor=2, thr=0.50001, resize_fn=None):
     """
     Converts a signed distance transform to surface points.
     """
     us = [surface_pts_upsample_factor] * X_sdt.ndim
-    
+
     if resize_fn is None:
         resized_vol = scipy.ndimage.interpolation.zoom(X_sdt, us, order=1, mode='reflect')
     else:
         resized_vol = resize_fn(X_sdt)
-        pred_shape = np.array(X_sdt.shape)*surface_pts_upsample_factor
+        pred_shape = np.array(X_sdt.shape) * surface_pts_upsample_factor
         assert np.array_equal(pred_shape, resized_vol.shape), 'resizing failed'
 
     X_edges = np.abs(resized_vol) < thr
     sf_pts = edge_to_surface_pts(X_edges, nb_surface_pts=nb_surface_pts)
 
     # can't just correct by surface_pts_upsample_factor because of how interpolation works...
-    return np.stack([sf_pts[..., f] * (X_sdt.shape[f] - 1) / (X_edges.shape[f] - 1) for f in range(X_sdt.ndim)], -1)
+    pt = [sf_pts[..., f] * (X_sdt.shape[f] - 1) / (X_edges.shape[f] - 1) for f in range(X_sdt.ndim)]
+    return np.stack(pt, -1)
 
 
 def jacobian_determinant(disp):
@@ -388,9 +436,9 @@ def jacobian_determinant(disp):
 
         return Jdet0 - Jdet1 + Jdet2
 
-    else: # must be 2 
-        
+    else:  # must be 2
+
         dfdx = J[0]
-        dfdy = J[1] 
-        
+        dfdy = J[1]
+
         return dfdx[..., 0] * dfdy[..., 1] - dfdy[..., 0] * dfdx[..., 1]

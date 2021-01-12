@@ -1,12 +1,26 @@
 #!/usr/bin/env python
 
 """
-Trains a segmentation network in an unsupervised fashion, using a probabilistic
-atlas and unlabeled scans.
+Trains a segmentation network in an unsupervised fashion, using a probabilistic atlas and unlabeled
+scans.
 
-Unsupervised deep learning for Bayesian brain MRI segmentation
-A.V. Dalca, E. Yu, P. Golland, B. Fischl, M.R. Sabuncu, J.E. Iglesias
-Under Review. arXiv https://arxiv.org/abs/1904.11319
+If you use this code, please cite the following 
+    Unsupervised deep learning for Bayesian brain MRI segmentation
+    A.V. Dalca, E. Yu, P. Golland, B. Fischl, M.R. Sabuncu, J.E. Iglesias
+    MICCAI 2019.
+    arXiv https://arxiv.org/abs/1904.11319
+
+Copyright 2020 Adrian V. Dalca
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
+compliance with the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is
+distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied. See the License for the specific language governing permissions and limitations under the
+License.
 """
 
 import os
@@ -26,26 +40,36 @@ parser = argparse.ArgumentParser()
 parser.add_argument('datadir', help='base data directory')
 parser.add_argument('--atlas', required=True, help='atlas filename')
 parser.add_argument('--mapping', help='atlas mapping filename')
-parser.add_argument('--model-dir', default='models', help='model output directory (default: models)')
+parser.add_argument('--model-dir', default='models',
+                    help='model output directory (default: models)')
 
 # training parameters
 parser.add_argument('--gpu', default='0', help='GPU ID numbers (default: 0)')
 parser.add_argument('--batch-size', type=int, default=1, help='batch size (default: 1)')
-parser.add_argument('--epochs', type=int, default=1500, help='number of training epochs (default: 1500)')
-parser.add_argument('--steps-per-epoch', type=int, default=100, help='frequency of model saves (default: 100)')
+parser.add_argument('--epochs', type=int, default=1500,
+                    help='number of training epochs (default: 1500)')
+parser.add_argument('--steps-per-epoch', type=int, default=100,
+                    help='frequency of model saves (default: 100)')
 parser.add_argument('--load-weights', help='optional weights file to initialize with')
-parser.add_argument('--initial-epoch', type=int, default=0, help='initial epoch number (default: 0)')
+parser.add_argument('--initial-epoch', type=int, default=0,
+                    help='initial epoch number (default: 0)')
 parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-4)')
 
 # network architecture parameters
-parser.add_argument('--enc', type=int, nargs='+', help='list of unet encoder filters (default: 16 32 32 32)')
-parser.add_argument('--dec', type=int, nargs='+', help='list of unet decorder filters (default: 32 32 32 32 32 16 16)')
-parser.add_argument('--no-warp-atlas', action='store_true', help='disable atlas warp method within network')
-parser.add_argument('--stat-pre-warp', action='store_true', help='compute gaussian stats before applying warp to atlas')
-parser.add_argument('--init-stat', help='npz file defining guesses for initial stats (with arrays init_mu and init_sigma)')
+parser.add_argument('--enc', type=int, nargs='+',
+                    help='list of unet encoder filters (default: 16 32 32 32)')
+parser.add_argument('--dec', type=int, nargs='+',
+                    help='list of unet decorder filters (default: 32 32 32 32 32 16 16)')
+parser.add_argument('--no-warp-atlas', action='store_true',
+                    help='disable atlas warp method within network')
+parser.add_argument('--stat-pre-warp', action='store_true',
+                    help='compute gaussian stats before applying warp to atlas')
+parser.add_argument('--init-stat',
+                    help='npz file defining guesses for initial stats (with arrays init_mu and init_sigma)')  # nopep8
 
 # loss hyperparameters
-parser.add_argument('--grad-loss-weight', type=float, default=10.0, help='weight of gradient loss (lamba) (default: 10.0)')
+parser.add_argument('--grad-loss-weight', type=float, default=10.0,
+                    help='weight of gradient loss (lamba) (default: 10.0)')
 args = parser.parse_args()
 
 
@@ -54,7 +78,8 @@ atlas_full = vxm.py.utils.load_volfile(args.atlas, add_batch_axis=True)
 if args.mapping:
     mapping = np.load(args.mapping)['mapping'].astype('int').flatten()
     assert len(mapping) == atlas_full.shape[-1], \
-        'mapping shape %d is inconsistent with atlas shape %d' % (len(mapping), atlas_full.shape[-1])
+        'mapping shape %d is inconsistent with atlas shape %d' % (
+            len(mapping), atlas_full.shape[-1])
     nb_labels = int(1 + np.max(mapping))
     atlas = np.zeros([*atlas_full.shape[:-1], nb_labels])
     for i in range(np.max(mapping.shape)):
@@ -84,7 +109,8 @@ os.makedirs(model_dir, exist_ok=True)
 
 # tensorflow device handling
 device, nb_devices = vxm.tf.utils.setup_device(args.gpu)
-assert np.mod(args.batch_size, nb_devices) == 0, 'Batch size (%d) should be a multiple of the number of gpus (%d)' % (args.batch_size, nb_devices)
+assert np.mod(args.batch_size, nb_devices) == 0,
+'Batch size (%d) should be a multiple of the nr of gpus (%d)' % (args.batch_size, nb_devices)
 
 # unet architecture
 enc_nf = args.enc if args.enc else [16, 32, 32, 32]
@@ -119,7 +145,7 @@ with tf.device(device):
 
     grad_weight = args.grad_loss_weight if warp_atlas else 0
 
-    losses  = [loss, vxm.losses.Grad('l2', loss_mult=2).loss]
+    losses = [loss, vxm.losses.Grad('l2', loss_mult=2).loss]
     weights = [1.0, grad_weight]
 
     # multi-gpu support
@@ -135,9 +161,9 @@ with tf.device(device):
     model.save(save_filename.format(epoch=args.initial_epoch))
 
     model.fit_generator(generator,
-        initial_epoch=args.initial_epoch,
-        epochs=args.epochs,
-        steps_per_epoch=args.steps_per_epoch,
-        callbacks=[save_callback],
-        verbose=1
-    )
+                        initial_epoch=args.initial_epoch,
+                        epochs=args.epochs,
+                        steps_per_epoch=args.steps_per_epoch,
+                        callbacks=[save_callback],
+                        verbose=1
+                        )

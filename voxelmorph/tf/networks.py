@@ -4,8 +4,19 @@ tensorflow/keras networks for voxelmorph
 If you use this code, please cite one of the voxelmorph papers:
 https://github.com/voxelmorph/voxelmorph/blob/master/citations.bib
 
-License: GPLv3
+Copyright 2020 Adrian V. Dalca
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in 
+ompliance with the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is
+distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or 
+implied. See the License for the specific language governing permissions and limitations under 
+the License.
 """
+
 
 # internal python imports
 from collections.abc import Iterable
@@ -21,54 +32,57 @@ import tensorflow.keras.initializers as KI
 import neurite as ne
 from .. import default_unet_features
 from . import layers
-from . import synthseg
-# TODO: change full module imports as opposed to specific function imports
-from .modelio import LoadableModel, store_config_args
-from .utils import value_at_location, point_spatial_transformer
+from . import utils
+from . import modelio
 
-
-# make ModelCheckpointParallel directly available from vxm
+# make directly available from vxm
 ModelCheckpointParallel = ne.callbacks.ModelCheckpointParallel
 
 
-class VxmDense(LoadableModel):
+class VxmDense(modelio.LoadableModel):
     """
     VoxelMorph network for (unsupervised) nonlinear registration between two images.
     """
 
-    @store_config_args
+    @modelio.store_config_args
     def __init__(self,
-            inshape,
-            nb_unet_features=None,
-            nb_unet_levels=None,
-            unet_feat_mult=1,
-            nb_unet_conv_per_level=1,
-            int_steps=7,
-            int_downsize=2,
-            bidir=False,
-            use_probs=False,
-            src_feats=1,
-            trg_feats=1,
-            unet_half_res=False,
-            input_model=None,
-            name='vxm_dense'):
+                 inshape,
+                 nb_unet_features=None,
+                 nb_unet_levels=None,
+                 unet_feat_mult=1,
+                 nb_unet_conv_per_level=1,
+                 int_steps=7,
+                 int_downsize=2,
+                 bidir=False,
+                 use_probs=False,
+                 src_feats=1,
+                 trg_feats=1,
+                 unet_half_res=False,
+                 input_model=None,
+                 fill_value=None,
+                 name='vxm_dense'):
         """ 
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
             nb_unet_features: Unet convolutional features. Can be specified via a list of lists with
-                the form [[encoder feats], [decoder feats]], or as a single integer. If None (default),
-                the unet features are defined by the default config described in the unet class documentation.
-            nb_unet_levels: Number of levels in unet. Only used when nb_unet_features is an integer. Default is None.
-            unet_feat_mult: Per-level feature multiplier. Only used when nb_unet_features is an integer. Default is 1.
+                the form [[encoder feats], [decoder feats]], or as a single integer. 
+                If None (default), the unet features are defined by the default config described in 
+                the unet class documentation.
+            nb_unet_levels: Number of levels in unet. Only used when nb_unet_features is an integer. 
+                Default is None.
+            unet_feat_mult: Per-level feature multiplier. Only used when nb_unet_features is an 
+                integer. Default is 1.
             nb_unet_conv_per_level: Number of convolutions per unet level. Default is 1.
-            int_steps: Number of flow integration steps. The warp is non-diffeomorphic when this value is 0.
-            int_downsize: Integer specifying the flow downsample factor for vector integration. The flow field
-                is not downsampled when this value is 1.
+            int_steps: Number of flow integration steps. The warp is non-diffeomorphic when this 
+                value is 0.
+            int_downsize: Integer specifying the flow downsample factor for vector integration. 
+                The flow field is not downsampled when this value is 1.
             bidir: Enable bidirectional cost function. Default is False.
             use_probs: Use probabilities in flow field. Default is False.
             src_feats: Number of source image features. Default is 1.
             trg_feats: Number of target image features. Default is 1.
-            unet_half_res: Skip the last unet decoder upsampling. Requires that int_downsize=2. Default is False.
+            unet_half_res: Skip the last unet decoder upsampling. Requires that int_downsize=2. 
+                Default is False.
             input_model: Model to replace default input layer before concatenation. Default is None.
             name: Model name - also used as layer name prefix. Default is 'vxm_dense'.
         """
@@ -99,17 +113,19 @@ class VxmDense(LoadableModel):
         # transform unet output into a flow field
         Conv = getattr(KL, 'Conv%dD' % ndims)
         flow_mean = Conv(ndims, kernel_size=3, padding='same',
-                    kernel_initializer=KI.RandomNormal(mean=0.0, stddev=1e-5), name='%s_flow' % name)(unet_model.output)
+                         kernel_initializer=KI.RandomNormal(mean=0.0, stddev=1e-5),
+                         name='%s_flow' % name)(unet_model.output)
 
         # optionally include probabilities
         if use_probs:
             # initialize the velocity variance very low, to start stable
             flow_logsigma = Conv(ndims, kernel_size=3, padding='same',
-                            kernel_initializer=KI.RandomNormal(mean=0.0, stddev=1e-10),
-                            bias_initializer=KI.Constant(value=-10),
-                            name='%s_log_sigma' % name)(unet_model.output)
+                                 kernel_initializer=KI.RandomNormal(mean=0.0, stddev=1e-10),
+                                 bias_initializer=KI.Constant(value=-10),
+                                 name='%s_log_sigma' % name)(unet_model.output)
             flow_params = KL.concatenate([flow_mean, flow_logsigma], name='%s_prob_concat' % name)
-            flow = ne.layers.SampleNormalLogVar(name='%s_z_sample' % name)([flow_mean, flow_logsigma])
+            flow_inputs = [flow_mean, flow_logsigma]
+            flow = ne.layers.SampleNormalLogVar(name='%s_z_sample' % name)(flow_inputs)
         else:
             flow_params = flow_mean
             flow = flow_mean
@@ -128,20 +144,34 @@ class VxmDense(LoadableModel):
 
         # integrate to produce diffeomorphic warp (i.e. treat flow as a stationary velocity field)
         if int_steps > 0:
-            pos_flow = layers.VecInt(method='ss', name='%s_flow_int' % name, int_steps=int_steps)(pos_flow)
+            pos_flow = layers.VecInt(method='ss',
+                                     name='%s_flow_int' % name,
+                                     int_steps=int_steps)(pos_flow)
             if bidir:
-                neg_flow = layers.VecInt(method='ss', name='%s_neg_flow_int' % name, int_steps=int_steps)(neg_flow)
+                neg_flow = layers.VecInt(method='ss',
+                                         name='%s_neg_flow_int' % name,
+                                         int_steps=int_steps)(neg_flow)
 
             # resize to final resolution
             if int_downsize > 1:
-                pos_flow = layers.RescaleTransform(int_downsize, name='%s_diffflow' % name)(pos_flow)
+                pos_flow = layers.RescaleTransform(
+                    int_downsize, name='%s_diffflow' % name)(pos_flow)
                 if bidir:
-                    neg_flow = layers.RescaleTransform(int_downsize, name='%s_neg_diffflow' % name)(neg_flow)
+                    neg_flow = layers.RescaleTransform(
+                        int_downsize, name='%s_neg_diffflow' % name)(neg_flow)
 
         # warp image with flow field
-        y_source = layers.SpatialTransformer(interp_method='linear', indexing='ij', name='%s_transformer' % name)([source, pos_flow])
+        y_source = layers.SpatialTransformer(
+            interp_method='linear', 
+            indexing='ij', 
+            fill_value=fill_value,
+            name='%s_transformer' % name)([source, pos_flow])
         if bidir:
-            y_target = layers.SpatialTransformer(interp_method='linear', indexing='ij', name='%s_neg_transformer' % name)([target, neg_flow])
+            st_inputs = [target, neg_flow]
+            y_target = layers.SpatialTransformer(interp_method='linear',
+                                                 indexing='ij',
+                                                 fill_value=fill_value,
+                                                 name='%s_neg_transformer' % name)(st_inputs)
 
         # initialize the keras model
         outputs = [y_source, y_target] if bidir else [y_source]
@@ -156,7 +186,7 @@ class VxmDense(LoadableModel):
         super().__init__(name=name, inputs=input_model.inputs, outputs=outputs)
 
         # cache pointers to layers and tensors for future reference
-        self.references = LoadableModel.ReferenceContainer()
+        self.references = modelio.LoadableModel.ReferenceContainer()
         self.references.unet_model = unet_model
         self.references.y_source = y_source
         self.references.y_target = y_target if bidir else None
@@ -181,46 +211,57 @@ class VxmDense(LoadableModel):
         """
         warp_model = self.get_registration_model()
         img_input = tf.keras.Input(shape=img.shape[1:])
-        y_img = layers.SpatialTransformer(interp_method=interp_method)([img_input, warp_model.output])
+        st_input = [img_input, warp_model.output]
+        y_img = layers.SpatialTransformer(interp_method=interp_method)(st_input)
         return tf.keras.Model(warp_model.inputs + [img_input], y_img).predict([src, trg, img])
 
 
-class VxmDenseSemiSupervisedSeg(LoadableModel):
+class VxmDenseSemiSupervisedSeg(modelio.LoadableModel):
     """
     VoxelMorph network for (semi-supervised) nonlinear registration between two images.
     """
 
-    @store_config_args
+    @modelio.store_config_args
     def __init__(self,
-        inshape,
-        nb_labels,
-        nb_unet_features=None,
-        int_steps=7,
-        int_downsize=2,
-        seg_downsize=2,
-        **kwargs):
+                 inshape,
+                 nb_labels,
+                 nb_unet_features=None,
+                 int_steps=7,
+                 int_downsize=2,
+                 seg_downsize=2,
+                 **kwargs):
         """
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
             nb_labels: Number of labels used for ground truth segmentations.
-            nb_unet_features: Unet convolutional features. See VxmDense documentation for more information.
-            int_steps: Number of flow integration steps. The warp is non-diffeomorphic when this value is 0.
-            int_downsize: Integer specifying the flow downsample factor for vector integration. The flow field
-                is not downsampled when this value is 1.
-            seg_downsize: Interger specifying the downsampled factor of the segmentations. Default is 2.
+            nb_unet_features: Unet convolutional features. 
+                See VxmDense documentation for more information.
+            int_steps: Number of flow integration steps. 
+                The warp is non-diffeomorphic when this value is 0.
+            int_downsize: Integer specifying the flow downsample factor for vector integration. 
+                The flow field is not downsampled when this value is 1.
+            seg_downsize: Interger specifying the downsampled factor of the segmentations.
+                Default is 2.
             kwargs: Forwarded to the internal VxmDense model.
         """
 
         # configure base voxelmorph network
-        vxm_model = VxmDense(inshape, nb_unet_features=nb_unet_features, int_steps=int_steps, int_downsize=int_downsize, **kwargs)
+        vxm_model = VxmDense(inshape,
+                             nb_unet_features=nb_unet_features,
+                             int_steps=int_steps,
+                             int_downsize=int_downsize,
+                             **kwargs)
 
         # configure downsampled seg input layer
         inshape_downsized = (np.array(inshape) / seg_downsize).astype(int)
         seg_src = tf.keras.Input(shape=(*inshape_downsized, nb_labels))
 
         # configure warped seg output layer
-        seg_flow = layers.RescaleTransform(1 / seg_downsize, name='seg_resize')(vxm_model.references.pos_flow)
-        y_seg = layers.SpatialTransformer(interp_method='linear', indexing='ij', name='seg_transformer')([seg_src, seg_flow])
+        seg_flow = layers.RescaleTransform(
+            1 / seg_downsize, name='seg_resize')(vxm_model.references.pos_flow)
+        y_seg = layers.SpatialTransformer(interp_method='linear',
+                                          indexing='ij',
+                                          name='seg_transformer')([seg_src, seg_flow])
 
         # initialize the keras model
         inputs = vxm_model.inputs + [seg_src]
@@ -228,7 +269,7 @@ class VxmDenseSemiSupervisedSeg(LoadableModel):
         super().__init__(inputs=inputs, outputs=outputs)
 
         # cache pointers to important layers and tensors for future reference
-        self.references = LoadableModel.ReferenceContainer()
+        self.references = modelio.LoadableModel.ReferenceContainer()
         self.references.pos_flow = vxm_model.references.pos_flow
 
     def get_registration_model(self):
@@ -249,30 +290,33 @@ class VxmDenseSemiSupervisedSeg(LoadableModel):
         """
         warp_model = self.get_registration_model()
         img_input = tf.keras.Input(shape=img.shape[1:])
-        y_img = layers.SpatialTransformer(interp_method=interp_method)([img_input, warp_model.output])
+        st_input = [img_input, warp_model.output]
+        y_img = layers.SpatialTransformer(interp_method=interp_method)(st_input)
         return tf.keras.Model(warp_model.inputs + [img_input], y_img).predict([src, trg, img])
 
 
-class VxmDenseSemiSupervisedPointCloud(LoadableModel):
+class VxmDenseSemiSupervisedPointCloud(modelio.LoadableModel):
     """
-    VoxelMorph network for semi-supervised nonlinear registration aided by surface point registration.
+    VoxelMorph network for semi-supervised nonlinear registration aided by surface point
+    registration.
     """
 
-    @store_config_args
+    @modelio.store_config_args
     def __init__(self,
-        inshape,
-        nb_surface_points,
-        nb_labels_sample,
-        nb_unet_features=None,
-        sdt_vol_resize=1,
-        surf_bidir=True,
-        **kwargs):
+                 inshape,
+                 nb_surface_points,
+                 nb_labels_sample,
+                 nb_unet_features=None,
+                 sdt_vol_resize=1,
+                 surf_bidir=True,
+                 **kwargs):
         """ 
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
             nb_surface_points: Number of surface points to warp.
             nb_labels_sample: Number of labels to sample.
-            nb_unet_features: Unet convolutional features. See VxmDense documentation for more information.
+            nb_unet_features: Unet convolutional features. 
+                See VxmDense documentation for more information.
             sdt_vol_resize: Resize factor of distance transform. Default is 1.
             surf_bidir: Train with bidirectional surface warping. Default is True.
             kwargs: Forwarded to the internal VxmDense model.
@@ -280,7 +324,7 @@ class VxmDenseSemiSupervisedPointCloud(LoadableModel):
 
         sdt_shape = [int(f * sdt_vol_resize) for f in inshape]
         surface_points_shape = [nb_surface_points, len(inshape) + 1]
-        single_pt_trf = lambda x: point_spatial_transformer(x, sdt_vol_resize=sdt_vol_resize)
+        single_pt_trf = lambda x: utils.point_spatial_transformer(x, sdt_vol_resize=sdt_vol_resize)
 
         # vxm model
         vxm_model = VxmDense(inshape, nb_unet_features=nb_unet_features, bidir=True, **kwargs)
@@ -291,33 +335,39 @@ class VxmDenseSemiSupervisedPointCloud(LoadableModel):
         atl_surf_input = tf.keras.Input(surface_points_shape, name='atl_surface_input')
 
         # warp atlas surface
-        # NOTE: pos diffflow is used to define an image moving x --> A, but when moving points, it moves A --> x
-        warped_atl_surf_pts = KL.Lambda(single_pt_trf, name='warped_atl_surface')([atl_surf_input, pos_flow])
+        # NOTE: pos diffflow is used to define an image moving x --> A,
+        #   but when moving points, it moves A --> x
+        warped_atl_surf_pts = KL.Lambda(single_pt_trf, name='warped_atl_surface')([
+            atl_surf_input, pos_flow])
 
         # get value of dt_input *at* warped_atlas_surface
         subj_dt_input = tf.keras.Input([*sdt_shape, nb_labels_sample], name='subj_dt_input')
-        subj_dt_value = KL.Lambda(value_at_location, name='hausdorff_subj_dt')([subj_dt_input, warped_atl_surf_pts])
+        subj_dt_value = KL.Lambda(utils.value_at_location, name='hausdorff_subj_dt')(
+            [subj_dt_input, warped_atl_surf_pts])
 
         if surf_bidir:
             # go the other way and warp subject to atlas
             subj_surf_input = tf.keras.Input(surface_points_shape, name='subj_surface_input')
-            warped_subj_surf_pts = KL.Lambda(single_pt_trf, name='warped_subj_surface')([subj_surf_input, neg_flow])
+            warped_subj_surf_pts = KL.Lambda(single_pt_trf, name='warped_subj_surface')([
+                subj_surf_input, neg_flow])
 
             atl_dt_input = tf.keras.Input([*sdt_shape, nb_labels_sample], name='atl_dt_input')
-            atl_dt_value = KL.Lambda(value_at_location, name='hausdorff_atl_dt')([atl_dt_input, warped_subj_surf_pts])
+            atl_dt_value = KL.Lambda(utils.value_at_location, name='hausdorff_atl_dt')(
+                [atl_dt_input, warped_subj_surf_pts])
 
-            inputs  = [*vxm_model.inputs, subj_dt_input, atl_dt_input, subj_surf_input, atl_surf_input]
+            inputs = [*vxm_model.inputs, subj_dt_input,
+                      atl_dt_input, subj_surf_input, atl_surf_input]
             outputs = [*vxm_model.outputs, subj_dt_value, atl_dt_value]
 
         else:
-            inputs  = [*vxm_model.inputs, subj_dt_input, atl_surf_input]
+            inputs = [*vxm_model.inputs, subj_dt_input, atl_surf_input]
             outputs = [*vxm_model.outputs, subj_dt_value]
 
         # initialize the keras model
         super().__init__(inputs=inputs, outputs=outputs)
 
         # cache pointers to important layers and tensors for future reference
-        self.references = LoadableModel.ReferenceContainer()
+        self.references = modelio.LoadableModel.ReferenceContainer()
         self.references.pos_flow = pos_flow
 
     def get_registration_model(self):
@@ -338,68 +388,50 @@ class VxmDenseSemiSupervisedPointCloud(LoadableModel):
         """
         warp_model = self.get_registration_model()
         img_input = tf.keras.Input(shape=img.shape[1:])
-        y_img = layers.SpatialTransformer(interp_method=interp_method)([img_input, warp_model.output])
+        st_input = [img_input, warp_model.output]
+        y_img = layers.SpatialTransformer(interp_method=interp_method)(st_input)
         return tf.keras.Model(warp_model.inputs + [img_input], y_img).predict([src, trg, img])
 
 
-class VxmDenseSynth(LoadableModel):
+class SynthMorphDense(modelio.LoadableModel):
     """
-    VoxelMorph network for registering segmentations.
+    SynthMorph model for learning subject-to-subject registration from images
+    with arbitrary contrasts synthesized from label maps.
     """
 
-    @store_config_args
-    def __init__(self, inshape, all_labels, hot_labels, nb_unet_features=None, int_steps=5, **kwargs):
+    @modelio.store_config_args
+    def __init__(self, inshape, labels_in, labels_out, reg_args={}, gen_args={}):
         """
         Parameters:
-            inshape: Input shape. e.g. (192, 192, 192)
-            all_labels: List of all labels included in training segmentations.
-            hot_labels: List of labels to output as one-hot maps.
-            nb_unet_features: Unet convolutional features. See VxmDense documentation for more information.
-            int_steps: Number of flow integration steps. The warp is non-diffeomorphic when this value is 0.
-            kwargs: Forwarded to the internal VxmDense model.
+            inshape: Input shape, e.g. (160, 160, 192).
+            labels_in: List of all labels included in the training segmentations.
+            labels_out: List of labels to encode in the output one-hot maps.
+            reg_args: Keyword arguments passed to the internal registration network.
+            gen_args: Keyword arguments passed to the internal generative model.
         """
 
-        # brain generation
-        make_im_model = lambda id: synthseg.labels_to_image_model.labels_to_image_model(
-            inshape, inshape, all_labels, hot_labels, id=id,
-            apply_affine_trans=False, apply_nonlin_trans=True, nonlin_shape_factor=0.0625, bias_shape_factor=0.025
-        )
-        bg_model_1, self.warp_shape, self.bias_shape = make_im_model(0)
-        bg_model_2 = make_im_model(1)[0]
-        image_1, labels_1 = bg_model_1.outputs[:2]
-        image_2, labels_2 = bg_model_2.outputs[:2]
+        # synthesis
+        gen_model_1 = ne.models.label_to_image(inshape, labels_in, labels_out, id=1, **gen_args)
+        gen_model_2 = ne.models.label_to_image(inshape, labels_in, labels_out, id=2, **gen_args)
+        img_1, map_1 = gen_model_1.outputs
+        img_2, map_2 = gen_model_2.outputs
 
-        # build brain generation input model
-        inputs = bg_model_1.inputs + bg_model_2.inputs
-        unet_input_model = tf.keras.Model(inputs=inputs, outputs=[image_1, image_2])
-
-        # attach dense voxelmorph network and extract flow field layer
-        dense_model = VxmDense(
-            inshape,
-            nb_unet_features=nb_unet_features,
-            int_steps=int_steps,
-            input_model=unet_input_model,
-            **kwargs
-        )
+        # prediction
+        inputs = gen_model_1.inputs + gen_model_2.inputs
+        input_model = tf.keras.Model(inputs=inputs, outputs=(img_1, img_2))
+        dense_model = VxmDense(inshape, input_model=input_model, **reg_args)
         flow = dense_model.references.pos_flow
 
-        # one-hot encoding
-        one_hot_func = lambda x: tf.one_hot(x[..., 0], len(hot_labels), dtype='float32')
-        one_hot_1 = KL.Lambda(one_hot_func)(labels_1)
-        one_hot_2 = KL.Lambda(one_hot_func)(labels_2)
-
         # transformation
-        pred = layers.SpatialTransformer(interp_method='linear', name='pred')([one_hot_1, flow])
-        concat = KL.Concatenate(axis=-1, name='concat')([one_hot_2, pred])
-
-        # initialize the keras model
-        super().__init__(inputs=inputs, outputs=[concat, flow])
+        pred = layers.SpatialTransformer(interp_method='linear', name='pred')([map_1, flow])
+        maps = KL.Concatenate(name='maps')([map_2, pred])
+        super().__init__(inputs=inputs, outputs=[maps, flow])
 
         # cache pointers to important layers and tensors for future reference
-        self.references = LoadableModel.ReferenceContainer()
+        self.references = modelio.LoadableModel.ReferenceContainer()
         self.references.flow = flow
-        self.references.bg_model_1 = bg_model_1
-        self.references.bg_model_1 = bg_model_1
+        self.references.gen_model_1 = gen_model_1
+        self.references.gen_model_2 = gen_model_2
         self.references.dense_model = dense_model
 
 
@@ -407,21 +439,22 @@ class VxmDenseSynth(LoadableModel):
 # Instance Trainers
 ###############################################################################
 
-class InstanceDense(LoadableModel):
+class InstanceDense(modelio.LoadableModel):
     """
     VoxelMorph network to perform instance-specific optimization.
     """
 
-    @store_config_args
+    @modelio.store_config_args
     def __init__(self, inshape, nb_feats=1, mult=1000, int_steps=7, int_downsize=2):
         """ 
         Parameters:
             inshape: Input shape of moving image. e.g. (192, 192, 192)
             nb_feats: Number of source image features. Default is 1.
             mult: Bias multiplier for local parameter layer. Default is 1000.
-            int_steps: Number of flow integration steps. The warp is non-diffeomorphic when this value is 0.
-            int_downsize: Integer specifying the flow downsample factor for vector integration. The flow field
-                is not downsampled when this value is 1.
+            int_steps: Number of flow integration steps. 
+                The warp is non-diffeomorphic when this value is 0.
+            int_downsize: Integer specifying the flow downsample factor for vector integration. 
+                The flow field is not downsampled when this value is 1.
         """
 
         # downsample warp shape
@@ -430,7 +463,7 @@ class InstanceDense(LoadableModel):
         source = tf.keras.Input(shape=(*inshape, nb_feats))
         flow_layer = ne.layers.LocalParamWithInput(shape=(*ds_warp_shape, len(inshape)), mult=mult)
         preint_flow = flow_layer(source)
-        
+
         # integrate to produce diffeomorphic warp (i.e. treat flow as a stationary velocity field)
         pos_flow = preint_flow
         if int_steps > 0:
@@ -441,13 +474,17 @@ class InstanceDense(LoadableModel):
                 pos_flow = layers.RescaleTransform(int_downsize, name='diffflow')(pos_flow)
 
         # warp image with flow field
-        y_source = layers.SpatialTransformer(interp_method='linear', indexing='ij', name='transformer')([source, pos_flow])
+        y_source = layers.SpatialTransformer(interp_method='linear',
+                                             indexing='ij',
+                                             name='transformer')([source, pos_flow])
 
         # initialize the keras model
-        super().__init__(name='vxm_instance_dense', inputs=[source], outputs=[y_source, preint_flow])
+        super().__init__(name='vxm_instance_dense',
+                         inputs=[source],
+                         outputs=[y_source, preint_flow])
 
         # cache pointers to important layers and tensors for future reference
-        self.references = LoadableModel.ReferenceContainer()
+        self.references = modelio.LoadableModel.ReferenceContainer()
         self.references.pos_flow = pos_flow
         self.references.flow_layer = flow_layer
         self.references.mult = mult
@@ -477,33 +514,35 @@ class InstanceDense(LoadableModel):
 # Probabilistic atlas-based segmentation
 ###############################################################################
 
-class ProbAtlasSegmentation(LoadableModel):
+class ProbAtlasSegmentation(modelio.LoadableModel):
     """
     VoxelMorph network to segment images by warping a probabilistic atlas.
     """
 
-    @store_config_args
+    @modelio.store_config_args
     def __init__(self,
-        inshape,
-        nb_labels,
-        nb_unet_features=None,
-        init_mu=None,
-        init_sigma=None,
-        warp_atlas=True,
-        stat_post_warp=True,
-        stat_nb_feats=16,
-        network_stat_weight=0.001,
-        **kwargs):
+                 inshape,
+                 nb_labels,
+                 nb_unet_features=None,
+                 init_mu=None,
+                 init_sigma=None,
+                 warp_atlas=True,
+                 stat_post_warp=True,
+                 stat_nb_feats=16,
+                 network_stat_weight=0.001,
+                 **kwargs):
         """ 
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
             nb_labels: Number of labels in probabilistic atlas.
-            nb_unet_features: Unet convolutional features. See VxmDense documentation for more information.
+            nb_unet_features: Unet convolutional features. 
+                See VxmDense documentation for more information.
             init_mu: Optional initialization for gaussian means. Default is None.
             init_sigma: Optional initialization for gaussian sigmas. Default is None.
             stat_post_warp: Computes gaussian stats using the warped atlas. Default is True.
             stat_nb_feats: Number of features in the stats convolutional layer. Default is 16.
-            network_stat_weight: Relative weight of the stats learned by the network. Default is 0.001.
+            network_stat_weight: Relative weight of the stats learned by the network. 
+                Default is 0.001.
             kwargs: Forwarded to the internal VxmDense model.
         """
 
@@ -512,7 +551,10 @@ class ProbAtlasSegmentation(LoadableModel):
         assert ndims in [1, 2, 3], 'ndims should be one of 1, 2, or 3. found: %d' % ndims
 
         # build warp network
-        vxm_model = VxmDense(inshape, nb_unet_features=nb_unet_features, src_feats=nb_labels, **kwargs)
+        vxm_model = VxmDense(inshape,
+                             nb_unet_features=nb_unet_features,
+                             src_feats=nb_labels,
+                             **kwargs)
 
         # extract necessary layers from the network
         # important to note that we're warping the atlas to the image in this case and
@@ -537,28 +579,33 @@ class ProbAtlasSegmentation(LoadableModel):
         weaknorm = KI.RandomNormal(mean=0.0, stddev=1e-5)
 
         # convolve into mu and sigma volumes
-        stat_mu_vol = Conv(nb_labels, kernel_size=3, name='mu_vol', kernel_initializer=weaknorm, bias_initializer=weaknorm)(conv)
-        stat_logssq_vol = Conv(nb_labels, kernel_size=3, name='logsigmasq_vol', kernel_initializer=weaknorm, bias_initializer=weaknorm)(conv)
-        
+        stat_mu_vol = Conv(nb_labels, kernel_size=3, name='mu_vol',
+                           kernel_initializer=weaknorm, bias_initializer=weaknorm)(conv)
+        stat_logssq_vol = Conv(nb_labels, kernel_size=3, name='logsigmasq_vol',
+                               kernel_initializer=weaknorm, bias_initializer=weaknorm)(conv)
+
         # pool to get 'final' stat
         stat_mu = KL.GlobalMaxPooling3D(name='mu_pooling')(stat_mu_vol)
         stat_logssq = KL.GlobalMaxPooling3D(name='logssq_pooling')(stat_logssq_vol)
 
         # combine mu with initialization
-        if init_mu is not None: 
+        if init_mu is not None:
             init_mu = np.array(init_mu)
-            stat_mu = KL.Lambda(lambda x: network_stat_weight * x + init_mu, name='comb_mu')(stat_mu)
-        
+            stat_mu = KL.Lambda(lambda x: network_stat_weight * x + init_mu,
+                                name='comb_mu')(stat_mu)
+
         # combine sigma with initialization
-        if init_sigma is not None: 
+        if init_sigma is not None:
             init_logsigmasq = np.array([2 * np.log(f) for f in init_sigma])
-            stat_logssq = KL.Lambda(lambda x: network_stat_weight * x + init_logsigmasq, name='comb_sigma')(stat_logssq)
+            stat_logssq = KL.Lambda(lambda x: network_stat_weight * x + init_logsigmasq,
+                                    name='comb_sigma')(stat_logssq)
 
         # unnorm loglike
-        def unnorm_loglike(I, mu, logsigmasq, use_log=True):
-            P = tf.distributions.Normal(mu, K.exp(logsigmasq/2))
-            return P.log_prob(I) if use_log else P.prob(I)
-        uloglhood = KL.Lambda(lambda x:unnorm_loglike(*x), name='unsup_likelihood')([image, stat_mu, stat_logssq])
+        def unnorm_loglike(img, mu, logsigmasq, use_log=True):
+            P = tf.distributions.Normal(mu, K.exp(logsigmasq / 2))
+            return P.log_prob(img) if use_log else P.prob(img)
+        uloglhood = KL.Lambda(lambda x: unnorm_loglike(*x),
+                              name='unsup_likelihood')([image, stat_mu, stat_logssq])
 
         # compute data loss as a layer, because it's a bit easier than outputting a ton of things
         def logsum(prob_ll, atl):
@@ -566,14 +613,15 @@ class ProbAtlasSegmentation(LoadableModel):
             # https://www.xarg.org/2016/06/the-log-sum-exp-trick-in-machine-learning
             logpdf = prob_ll + K.log(atl + K.epsilon())
             alpha = tf.reduce_max(logpdf, -1, keepdims=True)
-            return alpha + tf.log(tf.reduce_sum(K.exp(logpdf-alpha), -1, keepdims=True) + K.epsilon())
+            ked = K.exp(logpdf - alpha)
+            return alpha + tf.math.log(tf.reduce_sum(ked, -1, keepdims=True) + K.epsilon())
         loss_vol = KL.Lambda(lambda x: logsum(*x))([uloglhood, warped_atlas])
 
         # initialize the keras model
         super().__init__(inputs=[image, atlas], outputs=[loss_vol, flow])
 
         # cache pointers to layers and tensors for future reference
-        self.references = LoadableModel.ReferenceContainer()
+        self.references = modelio.LoadableModel.ReferenceContainer()
         self.references.vxm_model = vxm_model
         self.references.uloglhood = uloglhood
         self.references.stat_mu = stat_mu
@@ -597,17 +645,19 @@ class ProbAtlasSegmentation(LoadableModel):
 # Template Creation Networks
 ###############################################################################
 
-class TemplateCreation(LoadableModel):
+class TemplateCreation(modelio.LoadableModel):
     """
     VoxelMorph network to generate an unconditional template image.
     """
 
-    @store_config_args
-    def __init__(self, inshape, nb_unet_features=None, mean_cap=100, atlas_feats=1, src_feats=1, **kwargs):
+    @modelio.store_config_args
+    def __init__(self, inshape, nb_unet_features=None, mean_cap=100, atlas_feats=1, src_feats=1,
+                 **kwargs):
         """ 
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
-            nb_unet_features: Unet convolutional features. See VxmDense documentation for more information.
+            nb_unet_features: Unet convolutional features. 
+                See VxmDense documentation for more information.
             mean_cap: Cap for mean stream. Default is 100.
             atlas_feats: Number of atlas/template features. Default is 1.
             src_feats: Number of source image features. Default is 1.
@@ -615,16 +665,22 @@ class TemplateCreation(LoadableModel):
         """
 
         # configure inputs
-        atlas_input = tf.keras.Input(shape=[*inshape, atlas_feats], name='atlas_input')
         source_input = tf.keras.Input(shape=[*inshape, src_feats], name='source_input')
 
         # pre-warp (atlas) model
-        atlas_layer = ne.layers.LocalParamWithInput(name='atlas', shape=(*inshape, 1), mult=1.0, initializer=KI.RandomNormal(mean=0.0, stddev=1e-7))
-        atlas_tensor = atlas_layer(atlas_input)
-        warp_input_model = tf.keras.Model([atlas_input, source_input], outputs=[atlas_tensor, source_input])
+        atlas_layer = ne.layers.LocalParamWithInput(
+            shape=(*inshape, atlas_feats),
+            mult=1.0,
+            initializer=KI.RandomNormal(mean=0.0, stddev=1e-7),
+            name='atlas'
+        )
+        atlas_tensor = atlas_layer(source_input)
+        warp_input_model = tf.keras.Model(inputs=[source_input], outputs=[
+                                          atlas_tensor, source_input])
 
         # warp model
-        vxm_model = VxmDense(inshape, nb_unet_features=nb_unet_features, bidir=True, input_model=warp_input_model, **kwargs)
+        vxm_model = VxmDense(inshape, nb_unet_features=nb_unet_features,
+                             bidir=True, input_model=warp_input_model, **kwargs)
 
         # extract tensors from stacked model
         y_source = vxm_model.references.y_source
@@ -636,46 +692,89 @@ class TemplateCreation(LoadableModel):
         mean_stream = ne.layers.MeanStream(name='mean_stream', cap=mean_cap)(neg_flow)
 
         # initialize the keras model
-        super().__init__(inputs=[atlas_input, source_input], outputs=[y_source, y_target, mean_stream, pos_flow])
+        super().__init__(inputs=[source_input], outputs=[y_source, y_target, mean_stream, pos_flow])
 
         # cache pointers to important layers and tensors for future reference
-        self.references = LoadableModel.ReferenceContainer()
+        self.references = modelio.LoadableModel.ReferenceContainer()
         self.references.atlas_layer = atlas_layer
         self.references.atlas_tensor = atlas_tensor
+        self.references.vxm_model = vxm_model
+        self.references.pos_flow = pos_flow
+        self.references.neg_flow = neg_flow
+
+    def set_atlas(self, atlas):
+        """
+        Sets the atlas weights.
+        """
+        if atlas.shape[1]:
+            atlas = np.reshape(atlas, atlas.shape[1:])
+        self.references.atlas_layer.set_weights([atlas])
+
+    def get_atlas(self):
+        """
+        Sets the atlas weights.
+        """
+        return self.references.atlas_layer.get_weights()[0].squeeze()
+
+    def get_registration_model(self):
+        """
+        Returns a reconfigured model to predict only the final transform.
+        """
+        return tf.keras.Model(self.inputs, self.references.pos_flow)
+
+    def register(self, src, trg):
+        """
+        Predicts the transform from src to trg tensors.
+        """
+        return self.get_registration_model().predict([src, trg])
+
+    def apply_transform(self, src, trg, img, interp_method='linear', fill_value=None):
+        """
+        Predicts the transform from src to trg and applies it to the img tensor.
+        """
+        warp_model = self.get_registration_model()
+        img_input = tf.keras.Input(shape=img.shape[1:])
+        y_img = layers.SpatialTransformer(interp_method=interp_method,
+                                          fill_value=fill_value)([img_input, warp_model.output])
+        inputs = (*warp_model.inputs, img_input)
+        return tf.keras.Model(inputs=inputs, outputs=y_img).predict([src, trg, img])
 
 
-class ConditionalTemplateCreation(LoadableModel):
+class ConditionalTemplateCreation(modelio.LoadableModel):
     """
     VoxelMorph network to generate an conditional template image.
     """
 
-    @store_config_args
+    @modelio.store_config_args
     def __init__(self,
-        inshape,
-        pheno_input_shape,
-        nb_unet_features=None,
-        src_feats=1,
-        conv_image_shape=None,
-        conv_size=3,
-        conv_nb_levels=0,
-        conv_nb_features=32,
-        extra_conv_layers=3,
-        use_mean_stream=True,
-        mean_cap=100,
-        templcondsi=False,
-        templcondsi_init=None,
-        **kwargs):
+                 inshape,
+                 pheno_input_shape,
+                 nb_unet_features=None,
+                 src_feats=1,
+                 conv_image_shape=None,
+                 conv_size=3,
+                 conv_nb_levels=0,
+                 conv_nb_features=32,
+                 extra_conv_layers=3,
+                 use_mean_stream=True,
+                 mean_cap=100,
+                 templcondsi=False,
+                 templcondsi_init=None,
+                 **kwargs):
         """ 
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
             pheno_input_shape: Pheno data input shape. e.g. (2)
-            nb_unet_features: Unet convolutional features. See VxmDense documentation for more information.
+            nb_unet_features: Unet convolutional features. See VxmDense documentation for 
+                more information.
             src_feats: Number of source (atlas) features. Default is 1.
-            conv_image_shape: Intermediate phenotype image shape. Default is inshape with conv_nb_features.
+            conv_image_shape: Intermediate phenotype image shape. Default is inshape 
+                with conv_nb_features.
             conv_size: Atlas generator convolutional kernel size. Default is 3.
             conv_nb_levels: Number of levels in atlas generator unet. Default is 0.
             conv_nb_features: Number of features in atlas generator convolutions. Default is 32.
-            extra_conv_layers: Number of extra convolutions after unet in atlas generator. Default is 3.
+            extra_conv_layers: Number of extra convolutions after unet in atlas generator. 
+                Default is 3.
             use_mean_stream: Return mean stream layer for training. Default is True.
             mean_cap: Cap for mean stream. Default is 100.
             templcondsi: Default is False.
@@ -693,15 +792,19 @@ class ConditionalTemplateCreation(LoadableModel):
         pheno_init_model = tf.keras.models.Model(pheno_input, pheno_reshaped)
 
         # build model to decode reshaped pheno
-        pheno_decoder_model = ne.models.conv_dec(conv_nb_features, conv_image_shape, conv_nb_levels, conv_size,
-                                                 nb_labels=conv_nb_features, final_pred_activation='linear',
-                                                 input_model=pheno_init_model, name='atlas_decoder')
+        pheno_decoder_model = ne.models.conv_dec(conv_nb_features, conv_image_shape, conv_nb_levels,
+                                                 conv_size,
+                                                 nb_labels=conv_nb_features,
+                                                 final_pred_activation='linear',
+                                                 input_model=pheno_init_model,
+                                                 name='atlas_decoder')
 
         # add extra convolutions
         Conv = getattr(KL, 'Conv%dD' % len(inshape))
         last = pheno_decoder_model.output
         for n in range(extra_conv_layers):
-            last = Conv(conv_nb_features, kernel_size=conv_size, padding='same', name='atlas_extra_conv_%d' % n)(last)
+            last = Conv(conv_nb_features, kernel_size=conv_size,
+                        padding='same', name='atlas_extra_conv_%d' % n)(last)
 
         # final convolution to get atlas features
         atlas_gen = Conv(src_feats, kernel_size=3, padding='same', name='atlas_gen',
@@ -717,13 +820,14 @@ class ConditionalTemplateCreation(LoadableModel):
             # change first channel to be result from seg with another add layer
             tmp_layer = KL.Lambda(lambda x: K.softmax(x[..., 1:]))(atlas_tensor)
             conv_layer = Conv(1, kernel_size=1, padding='same', use_bias=False, name='atlas_gen',
-                kernel_initializer=KI.RandomNormal(mean=0, stddev=1e-5))
+                              kernel_initializer=KI.RandomNormal(mean=0, stddev=1e-5))
             x_img = conv_layer(tmp_layer)
             if templcondsi_init is not None:
                 weights = conv_layer.get_weights()
                 weights[0] = templcondsi_init.reshape(weights[0].shape)
                 conv_layer.set_weights(weights)
-            atlas_tensor = KL.Lambda(lambda x: K.concatenate([x[0], x[1][...,1:]]), name='atlas')([x_img, atlas_tensor])
+            atlas_tensor = KL.Lambda(lambda x: K.concatenate([x[0], x[1][..., 1:]]),
+                                     name='atlas')([x_img, atlas_tensor])
         else:
             atlas_tensor = KL.Add(name='atlas')([atlas_input, atlas_gen])
 
@@ -734,7 +838,8 @@ class ConditionalTemplateCreation(LoadableModel):
         warp_input_model = tf.keras.Model(inputs=inputs, outputs=[atlas_tensor, source_input])
 
         # warp model
-        vxm_model = VxmDense(inshape, nb_unet_features=nb_unet_features, bidir=True, input_model=warp_input_model, **kwargs)
+        vxm_model = VxmDense(inshape, nb_unet_features=nb_unet_features,
+                             bidir=True, input_model=warp_input_model, **kwargs)
 
         # extract tensors from stacked model
         y_source = vxm_model.references.y_source
@@ -762,12 +867,12 @@ class Transform(tf.keras.Model):
     """
 
     def __init__(self,
-        inshape,
-        affine=False,
-        interp_method='linear',
-        rescale=None,
-        fill_value=None,
-        nb_feats=1):
+                 inshape,
+                 affine=False,
+                 interp_method='linear',
+                 rescale=None,
+                 fill_value=None,
+                 nb_feats=1):
         """
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
@@ -800,9 +905,10 @@ class Transform(tf.keras.Model):
 
 class Unet(tf.keras.Model):
     """
-    A unet architecture that builds off either an input keras model or input shape. Layer features can be
-    specified directly as a list of encoder and decoder features or as a single integer along with a number
-    of unet levels. The default network features per layer (when no options are specified) are:
+    A unet architecture that builds off either an input keras model or input shape. Layer features 
+    can be specified directly as a list of encoder and decoder features or as a single integer along
+    with a number of unet levels. The default network features per layer (when no options are
+    specified) are:
 
         encoder: [16, 32, 32, 32]
         decoder: [32, 32, 32, 32, 32, 16, 16]
@@ -821,18 +927,25 @@ class Unet(tf.keras.Model):
                  nb_conv_per_level=1,
                  do_res=False,
                  half_res=False,
+                 hyp_input=None,
+                 hyp_tensor=None,
                  name='unet'):
         """
         Parameters:
             inshape: Optional input tensor shape (including features). e.g. (192, 192, 192, 2).
-            input_model: Optional input model that feeds directly into the unet before concatenation.
+            input_model: Optional input model that feeds directly into the unet before concatenation
             nb_features: Unet convolutional features. Can be specified via a list of lists with
-                the form [[encoder feats], [decoder feats]], or as a single integer. If None (default),
-                the unet features are defined by the default config described in the class documentation.
-            nb_levels: Number of levels in unet. Only used when nb_features is an integer. Default is None.
-            feat_mult: Per-level feature multiplier. Only used when nb_features is an integer. Default is 1.
+                the form [[encoder feats], [decoder feats]], or as a single integer. 
+                If None (default), the unet features are defined by the default config described in 
+                the class documentation.
+            nb_levels: Number of levels in unet. Only used when nb_features is an integer. 
+                Default is None.
+            feat_mult: Per-level feature multiplier. Only used when nb_features is an integer. 
+                Default is 1.
             nb_conv_per_level: Number of convolutions per unet level. Default is 1.
             half_res: Skip the last decoder upsampling. Default is False.
+            hyp_input: Hypernetwork input tensor. Enables HyperConvs if provided. Default is None.
+            hyp_tensor: Hypernetwork final tensor. Enables HyperConvs if provided. Default is None.
             name: Model name - also used as layer name prefix. Default is 'unet'.
         """
 
@@ -845,6 +958,10 @@ class Unet(tf.keras.Model):
         else:
             unet_input = KL.concatenate(input_model.outputs, name='%s_input_concat' % name)
             model_inputs = input_model.inputs
+
+        # add hyp_input tensor if provided
+        if hyp_input is not None:
+            model_inputs = model_inputs + [hyp_input]
 
         # default encoder and decoder layer features if nothing provided
         if nb_features is None:
@@ -874,7 +991,7 @@ class Unet(tf.keras.Model):
         nb_levels = int(nb_dec_convs / nb_conv_per_level) + 1
 
         if isinstance(max_pool, int):
-            max_pool = [max_pool]*nb_levels
+            max_pool = [max_pool] * nb_levels
 
         # configure encoder (down-sampling path)
         enc_layers = []
@@ -883,9 +1000,9 @@ class Unet(tf.keras.Model):
             for conv in range(nb_conv_per_level):
                 nf = enc_nf[level * nb_conv_per_level + conv]
                 layer_name = '%s_enc_conv_%d_%d' % (name, level, conv)
-                last = _conv_block(last, nf, name=layer_name, do_res=do_res)
+                last = _conv_block(last, nf, name=layer_name, do_res=do_res, hyp_tensor=hyp_tensor)
             enc_layers.append(last)
-            
+
             # temporarily use maxpool since downsampling doesn't exist in keras
             last = MaxPooling(max_pool[level], name='%s_enc_pooling_%d' % (name, level))(last)
 
@@ -895,32 +1012,201 @@ class Unet(tf.keras.Model):
             for conv in range(nb_conv_per_level):
                 nf = dec_nf[level * nb_conv_per_level + conv]
                 layer_name = '%s_dec_conv_%d_%d' % (name, real_level, conv)
-                last = _conv_block(last, nf, name=layer_name, do_res=do_res)
+                last = _conv_block(last, nf, name=layer_name, do_res=do_res, hyp_tensor=hyp_tensor)
             if not half_res or level < (nb_levels - 2):
                 layer_name = '%s_dec_upsample_%d' % (name, real_level)
-                last = _upsample_block(last, enc_layers.pop(), factor=max_pool[real_level], name=layer_name)
+                last = _upsample_block(last, enc_layers.pop(), factor=max_pool[real_level],
+                                       name=layer_name)
 
         # now we take care of any remaining convolutions
         for num, nf in enumerate(final_convs):
             layer_name = '%s_dec_final_conv_%d' % (name, num)
-            last = _conv_block(last, nf, name=layer_name)
+            last = _conv_block(last, nf, name=layer_name, hyp_tensor=hyp_tensor)
 
         super().__init__(inputs=model_inputs, outputs=last, name=name)
+
+
+###############################################################################
+# HyperMorph
+###############################################################################
+
+class HyperVxmDense(modelio.LoadableModel):
+    """
+    HyperMorph-VxmDense network amortized hyperparameter learning.
+    """
+
+    @modelio.store_config_args
+    def __init__(self,
+                 inshape,
+                 nb_unet_features=None,
+                 nb_unet_levels=None,
+                 unet_feat_mult=1,
+                 nb_unet_conv_per_level=1,
+                 int_steps=7,
+                 int_downsize=2,
+                 bidir=False,
+                 use_probs=False,
+                 src_feats=1,
+                 trg_feats=1,
+                 unet_half_res=False,
+                 nb_hyp_params=1,
+                 nb_hyp_layers=4,
+                 nb_hyp_units=64,
+                 name='hyper_vxm_dense'):
+        """ 
+        Parameters:
+            inshape: Input shape. e.g. (192, 192, 192)
+            nb_unet_features: Unet convolutional features. Can be specified via a list of lists with
+                the form [[encoder feats], [decoder feats]], or as a single integer. 
+                If None (default), the unet features are defined by the default config described in 
+                the unet class documentation.
+            nb_unet_levels: Number of levels in unet. Only used when nb_unet_features is an integer. 
+                Default is None.
+            unet_feat_mult: Per-level feature multiplier. Only used when nb_unet_features is an 
+                integer. Default is 1.
+            nb_unet_conv_per_level: Number of convolutions per unet level. Default is 1.
+            int_steps: Number of flow integration steps. The warp is non-diffeomorphic when this 
+                value is 0.
+            int_downsize: Integer specifying the flow downsample factor for vector integration. 
+                The flow field is not downsampled when this value is 1.
+            bidir: Enable bidirectional cost function. Default is False.
+            use_probs: Use probabilities in flow field. Default is False.
+            src_feats: Number of source image features. Default is 1.
+            trg_feats: Number of target image features. Default is 1.
+            unet_half_res: Skip the last unet decoder upsampling. Requires that int_downsize=2. 
+                Default is False.
+            name: Model name - also used as layer name prefix. Default is 'vxm_dense'.
+        """
+
+        # ensure correct dimensionality
+        ndims = len(inshape)
+        assert ndims in [1, 2, 3], 'ndims should be one of 1, 2, or 3. found: %d' % ndims
+
+        # configure default input layers if an input model is not provided
+        source = tf.keras.Input(shape=(*inshape, src_feats), name='%s_source_input' % name)
+        target = tf.keras.Input(shape=(*inshape, trg_feats), name='%s_target_input' % name)
+        input_model = tf.keras.Model(inputs=[source, target], outputs=[source, target])
+
+        # build hypernetwork
+        hyp_input = tf.keras.Input(shape=[nb_hyp_params], name='%s_hyp_input' % name)
+        hyp_last = hyp_input
+        for n in range(nb_hyp_layers):
+            hyp_last = KL.Dense(nb_hyp_units, activation='relu',
+                                name='%s_hyp_dense_%d' % (name, n + 1))(hyp_last)
+
+        # build core unet model and grab inputs
+        unet_model = Unet(
+            input_model=input_model,
+            nb_features=nb_unet_features,
+            nb_levels=nb_unet_levels,
+            feat_mult=unet_feat_mult,
+            nb_conv_per_level=nb_unet_conv_per_level,
+            half_res=unet_half_res,
+            hyp_input=hyp_input,
+            hyp_tensor=hyp_last,
+            name='%s_unet' % name
+        )
+
+        # transform unet output into a flow field
+        Conv = getattr(ne.layers, 'HyperConv%dDFromDense' % ndims)
+        flow_mean = Conv(ndims, kernel_size=3, padding='same',
+                         name='%s_flow' % name)([unet_model.output, hyp_last])
+
+        # optionally include probabilities
+        if use_probs:
+            # initialize the velocity variance very low, to start stable
+            flow_logsigma = Conv(ndims, kernel_size=3, padding='same',
+                                 name='%s_log_sigma' % name)([unet_model.output, hyp_last])
+            flow_params = KL.concatenate([flow_mean, flow_logsigma], name='%s_prob_concat' % name)
+            flow_inputs = [flow_mean, flow_logsigma]
+            flow = ne.layers.SampleNormalLogVar(name='%s_z_sample' % name)(flow_inputs)
+        else:
+            flow_params = flow_mean
+            flow = flow_mean
+
+        if not unet_half_res:
+            # optionally resize for integration
+            if int_steps > 0 and int_downsize > 1:
+                flow = layers.RescaleTransform(1 / int_downsize, name='%s_flow_resize' % name)(flow)
+
+        preint_flow = flow
+
+        # optionally negate flow for bidirectional model
+        pos_flow = flow
+        if bidir:
+            neg_flow = ne.layers.Negate(name='%s_neg_flow' % name)(flow)
+
+        # integrate to produce diffeomorphic warp (i.e. treat flow as a stationary velocity field)
+        if int_steps > 0:
+            pos_flow = layers.VecInt(method='ss',
+                                     name='%s_flow_int' % name,
+                                     int_steps=int_steps)(pos_flow)
+            if bidir:
+                neg_flow = layers.VecInt(method='ss',
+                                         name='%s_neg_flow_int' % name,
+                                         int_steps=int_steps)(neg_flow)
+
+            # resize to final resolution
+            if int_downsize > 1:
+                pos_flow = layers.RescaleTransform(
+                    int_downsize, name='%s_diffflow' % name)(pos_flow)
+                if bidir:
+                    neg_flow = layers.RescaleTransform(
+                        int_downsize, name='%s_neg_diffflow' % name)(neg_flow)
+
+        # warp image with flow field
+        y_source = layers.SpatialTransformer(
+            interp_method='linear', indexing='ij', name='%s_transformer' % name)([source, pos_flow])
+        if bidir:
+            st_inputs = [target, neg_flow]
+            y_target = layers.SpatialTransformer(interp_method='linear',
+                                                 indexing='ij',
+                                                 name='%s_neg_transformer' % name)(st_inputs)
+
+        # initialize the keras model
+        outputs = [y_source, y_target] if bidir else [y_source]
+
+        if use_probs:
+            # compute loss on flow probabilities
+            outputs += [flow_params]
+        else:
+            # compute smoothness loss on pre-integrated warp
+            outputs += [preint_flow]
+
+        super().__init__(name=name, inputs=[source, target, hyp_input], outputs=outputs)
+
+        # cache pointers to layers and tensors for future reference
+        self.references = modelio.LoadableModel.ReferenceContainer()
+        self.references.hyper_val = hyp_input
+        self.references.unet_model = unet_model
+        self.references.y_source = y_source
+        self.references.y_target = y_target if bidir else None
+        self.references.pos_flow = pos_flow
+        self.references.neg_flow = neg_flow if bidir else None
 
 
 ###############################################################################
 # Private functions
 ###############################################################################
 
-def _conv_block(x, nfeat, strides=1, name=None, do_res=False):
+def _conv_block(x, nfeat, strides=1, name=None, do_res=False, hyp_tensor=None):
     """
     Specific convolutional block followed by leakyrelu for unet.
     """
     ndims = len(x.get_shape()) - 2
     assert ndims in (1, 2, 3), 'ndims should be one of 1, 2, or 3. found: %d' % ndims
-    Conv = getattr(KL, 'Conv%dD' % ndims)
 
-    convolved = Conv(nfeat, kernel_size=3, padding='same', kernel_initializer='he_normal', strides=strides, name=name)(x)
+    extra_conv_params = {}
+    if hyp_tensor is not None:
+        Conv = getattr(ne.layers, 'HyperConv%dDFromDense' % ndims)
+        conv_inputs = [x, hyp_tensor]
+    else:
+        Conv = getattr(KL, 'Conv%dD' % ndims)
+        extra_conv_params['kernel_initializer'] = 'he_normal'
+        conv_inputs = x
+
+    convolved = Conv(nfeat, kernel_size=3, padding='same',
+                     strides=strides, name=name, **extra_conv_params)(conv_inputs)
     name = name + '_activation' if name else None
 
     if do_res:
@@ -928,7 +1214,8 @@ def _conv_block(x, nfeat, strides=1, name=None, do_res=False):
         add_layer = x
         print('note: this is a weird thing to do, since its not really residual training anymore')
         if nfeat != x.get_shape().as_list()[-1]:
-            add_layer = Conv(nfeat, kernel_size=3, padding='same', kernel_initializer='he_normal', name='resfix_'+name)(x)
+            add_layer = Conv(nfeat, kernel_size=3, padding='same',
+                             name='resfix_' + name, **extra_conv_params)(conv_inputs)
         convolved = KL.Lambda(lambda x: x[0] + x[1])([add_layer, convolved])
 
     return KL.LeakyReLU(0.2, name=name)(convolved)
@@ -941,7 +1228,7 @@ def _upsample_block(x, connection, factor=2, name=None):
     ndims = len(x.get_shape()) - 2
     assert ndims in (1, 2, 3), 'ndims should be one of 1, 2, or 3. found: %d' % ndims
     UpSampling = getattr(KL, 'UpSampling%dD' % ndims)
-    
+
     upsampled = UpSampling(size=(factor,) * ndims, name=name)(x)
     name = name + '_concat' if name else None
     return KL.concatenate([upsampled, connection], name=name)

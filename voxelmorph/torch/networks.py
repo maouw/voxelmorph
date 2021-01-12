@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,10 +25,13 @@ class Unet(nn.Module):
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
             nb_features: Unet convolutional features. Can be specified via a list of lists with
-                the form [[encoder feats], [decoder feats]], or as a single integer. If None (default),
-                the unet features are defined by the default config described in the class documentation.
-            nb_levels: Number of levels in unet. Only used when nb_features is an integer. Default is None.
-            feat_mult: Per-level feature multiplier. Only used when nb_features is an integer. Default is 1.
+                the form [[encoder feats], [decoder feats]], or as a single integer. 
+                If None (default), the unet features are defined by the default config 
+                described in the class documentation.
+            nb_levels: Number of levels in unet. Only used when nb_features is an integer. 
+                Default is None.
+            feat_mult: Per-level feature multiplier. Only used when nb_features is an integer. 
+                Default is 1.
         """
 
         # ensure correct dimensionality
@@ -73,7 +77,7 @@ class Unet(nn.Module):
         for nf in self.dec_nf[len(self.enc_nf):]:
             self.extras.append(ConvBlock(ndims, prev_nf, nf, stride=1))
             prev_nf = nf
- 
+
     def forward(self, x):
 
         # get encoder activations
@@ -102,25 +106,29 @@ class VxmDense(LoadableModel):
 
     @store_config_args
     def __init__(self,
-        inshape,
-        nb_unet_features=None,
-        nb_unet_levels=None,
-        unet_feat_mult=1,
-        int_steps=7,
-        int_downsize=2,
-        bidir=False,
-        use_probs=False):
+                 inshape,
+                 nb_unet_features=None,
+                 nb_unet_levels=None,
+                 unet_feat_mult=1,
+                 int_steps=7,
+                 int_downsize=2,
+                 bidir=False,
+                 use_probs=False):
         """ 
         Parameters:
             inshape: Input shape. e.g. (192, 192, 192)
             nb_unet_features: Unet convolutional features. Can be specified via a list of lists with
-                the form [[encoder feats], [decoder feats]], or as a single integer. If None (default),
-                the unet features are defined by the default config described in the unet class documentation.
-            nb_unet_levels: Number of levels in unet. Only used when nb_features is an integer. Default is None.
-            unet_feat_mult: Per-level feature multiplier. Only used when nb_features is an integer. Default is 1.
-            int_steps: Number of flow integration steps. The warp is non-diffeomorphic when this value is 0.
-            int_downsize: Integer specifying the flow downsample factor for vector integration. The flow field
-                is not downsampled when this value is 1.
+                the form [[encoder feats], [decoder feats]], or as a single integer. 
+                If None (default), the unet features are defined by the default config described in 
+                the unet class documentation.
+            nb_unet_levels: Number of levels in unet. Only used when nb_features is an integer. 
+                Default is None.
+            unet_feat_mult: Per-level feature multiplier. Only used when nb_features is an integer. 
+                Default is 1.
+            int_steps: Number of flow integration steps. The warp is non-diffeomorphic when this 
+                value is 0.
+            int_downsize: Integer specifying the flow downsample factor for vector integration. 
+                The flow field is not downsampled when this value is 1.
             bidir: Enable bidirectional cost function. Default is False.
             use_probs: Use probabilities in flow field. Default is False.
         """
@@ -151,7 +159,8 @@ class VxmDense(LoadableModel):
 
         # probabilities are not supported in pytorch
         if use_probs:
-            raise NotImplementedError('Flow variance has not been implemented in pytorch - set use_probs to False')
+            raise NotImplementedError(
+                'Flow variance has not been implemented in pytorch - set use_probs to False')
 
         # configure optional resize layers
         resize = int_steps > 0 and int_downsize > 1

@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 """
-Example script for testing quality of trained vxm models. This script iterates over a list of
-images and corresponding segmentations, registers them to an atlas, propagates segmentations
-to the atlas, and computes the dice overlap. Example usage is:
+Example script for testing quality of trained vxm models. This script iterates over a list of images
+and corresponding segmentations, registers them to an atlas, propagates segmentations to the atlas,
+and computes the dice overlap. Example usage is:
 
     test.py \
     --model models/model.h5 \
@@ -11,8 +11,25 @@ to the atlas, and computes the dice overlap. Example usage is:
     --scans data/test_scan.npz \
     --labels data/labels.npz
 
-Where each atlas and scan npz file is assumed to contain the array variables 'vol' and 'seg'.
-This script will most likely need to be customized to fit your data.
+Where each atlas and scan npz file is assumed to contain the array variables 'vol' and 'seg'. This
+script will most likely need to be customized to fit your data.
+
+If you use this code, please cite the following, and read function docs for further info/citations
+    VoxelMorph: A Learning Framework for Deformable Medical Image Registration 
+    G. Balakrishnan, A. Zhao, M. R. Sabuncu, J. Guttag, A.V. Dalca. 
+    IEEE TMI: Transactions on Medical Imaging. 38(8). pp 1788-1800. 2019. 
+
+Copyright 2020 Adrian V. Dalca
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in
+compliance with the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is
+distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied. See the License for the specific language governing permissions and limitations under the
+License.
 """
 
 import os
@@ -29,7 +46,8 @@ parser.add_argument('--atlas', required=True, help='atlas npz file')
 parser.add_argument('--scans', nargs='+', required=True, help='test scan npz files')
 parser.add_argument('--labels', required=True, help='label lookup file in npz format')
 parser.add_argument('--gpu', help='GPU number - if not supplied, CPU is used')
-parser.add_argument('--multichannel', action='store_true', help='specify that data has multiple channels')
+parser.add_argument('--multichannel', action='store_true',
+                    help='specify that data has multiple channels')
 args = parser.parse_args()
 
 # device handling
@@ -40,7 +58,8 @@ labels = np.load(args.labels)['labels']
 
 # load atlas volume and seg
 add_feat_axis = not args.multichannel
-atlas_vol = vxm.py.utils.load_volfile(args.atlas, np_var='vol', add_batch_axis=True, add_feat_axis=add_feat_axis)
+atlas_vol = vxm.py.utils.load_volfile(
+    args.atlas, np_var='vol', add_batch_axis=True, add_feat_axis=add_feat_axis)
 atlas_seg = vxm.py.utils.load_volfile(args.atlas, np_var='seg')
 inshape = atlas_seg.shape
 
@@ -56,8 +75,10 @@ with tf.device(device):
     for i, scan in enumerate(args.scans):
 
         # load scan
-        moving_vol = vxm.py.utils.load_volfile(scan, np_var='vol', add_batch_axis=True, add_feat_axis=add_feat_axis)
-        moving_seg = vxm.py.utils.load_volfile(scan, np_var='seg', add_batch_axis=True, add_feat_axis=add_feat_axis)
+        moving_vol = vxm.py.utils.load_volfile(
+            scan, np_var='vol', add_batch_axis=True, add_feat_axis=add_feat_axis)
+        moving_seg = vxm.py.utils.load_volfile(
+            scan, np_var='seg', add_batch_axis=True, add_feat_axis=add_feat_axis)
 
         # predict and apply transform
         warp = registration_model.predict([moving_vol, atlas_vol])
