@@ -8,7 +8,9 @@ RUN adduser --disabled-password --gecos "App" app && \
 # set ownership of everything
 RUN chown -R app:app /home/app
 
-RUN apt-get install emacs -y
+RUN apt-get update && \
+    apt-get install emacs -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Switch to unprivileged user
 USER app
