@@ -9,7 +9,7 @@ RUN adduser --disabled-password --gecos "App" app && \
 RUN chown -R app:app /home/app
 
 RUN apt-get update && \
-    apt-get install emacs -y && \
+    apt-get install emacs maven -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Switch to unprivileged user
