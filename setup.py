@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-
 import pathlib
 import re
 
 import setuptools
+from pkg_resources import DistributionNotFound, get_distribution
 
 setuptools.dist.Distribution().fetch_build_eggs(["packaging"])
 import packaging.version
@@ -21,6 +21,21 @@ if not match:
 version = match.group(1)
 if isinstance(packaging.version.parse(version), packaging.version.LegacyVersion):
     raise RuntimeError(f"Invalid version string {version}.")
+
+
+def get_dist(package):
+    try:
+        get_distribution(package)
+    except DistributionNotFound:
+        return None
+
+
+#
+tensorflow = []
+
+# don't install tensorflow if tensorflow-gpu is installed and vice versa
+if get_dist("tensorflow") is None and get_dist("tensorflow-gpu") is None:
+    tensorflow.append("tensorflow")
 
 # run setup
 setuptools.setup(
@@ -46,6 +61,6 @@ setuptools.setup(
         "scipy",
         "nibabel",
         "neurite>=0.2",
-        "tensorflow",
-    ],
+    ]
+    + tensorflow,
 )
