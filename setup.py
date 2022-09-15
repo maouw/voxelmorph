@@ -25,7 +25,7 @@ if isinstance(packaging.version.parse(version), packaging.version.LegacyVersion)
 
 def get_dist(package):
     try:
-        get_distribution(package)
+        return get_distribution(package)
     except DistributionNotFound:
         return None
 
