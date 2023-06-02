@@ -212,13 +212,9 @@ class VxmDense(ne.modelio.LoadableModel):
 
         # resize to original resolution, hard-coded
         rescale_factor = 2
-        pos_flow = layers.RescaleTransform(
-            rescale_factor, name="%s_diffflow" % name
-        )(pos_flow)
-        if bidir:
-            neg_flow = layers.RescaleTransform(
-                rescale_factor, name="%s_neg_diffflow" % name
-            )(neg_flow)
+        pos_flow = KL.UpSampling3D(size=(rescale_factor,) * 3, name="final_upsample")(
+            pos_flow
+        )
 
         # warp image with flow field
         y_source = layers.SpatialTransformer(
@@ -1461,7 +1457,10 @@ def _upsample_block(x, connection, factor=2, name=None):
     for delta in shape_delta:
         assert (delta / 2).is_integer()
 
-    slc = (slice(None),) + tuple([slice(delta // 2, -delta // 2) for delta in shape_delta]) + (slice(None),)
+    slc = (
+        (slice(None),)
+        + tuple([slice(delta // 2, -delta // 2) for delta in shape_delta])
+        + (slice(None),)
+    )
 
     return KL.concatenate([upsampled, connection[slc]], name=name)
-
