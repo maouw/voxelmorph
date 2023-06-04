@@ -186,8 +186,26 @@ class VxmDense(ne.modelio.LoadableModel):
         else:
             flow = flow_mean
 
+        # rescale field to target svf resolution
+        pre_svf_size = np.array(flow.shape[1:-1])
+        svf_size = np.array([np.round(dim / svf_resolution) for dim in inshape])
+        if not np.array_equal(pre_svf_size, svf_size):
+            rescale_factor = svf_size[0] / pre_svf_size[0]
+            flow = layers.RescaleTransform(rescale_factor, name=f"{name}_svf_resize")(
+                flow
+            )
+
         # cache svf
         svf = flow
+
+        # rescale field to target integration resolution
+        if int_steps > 0 and int_resolution > 1:
+            int_size = np.array([np.round(dim / int_resolution) for dim in inshape])
+            if not np.array_equal(svf_size, int_size):
+                rescale_factor = int_size[0] / svf_size[0]
+                flow = layers.RescaleTransform(
+                    rescale_factor, name=f"{name}_flow_resize"
+                )(flow)
 
         # cache pre-integrated flow field
         preint_flow = flow
@@ -210,15 +228,16 @@ class VxmDense(ne.modelio.LoadableModel):
         # cache the intgrated flow field
         postint_flow = pos_flow
 
-        # resize to original resolution, hard-coded
-        rescale_factor = 2
-        pos_flow = layers.RescaleTransform(
-            rescale_factor, name="%s_diffflow" % name
-        )(pos_flow)
-        if bidir:
-            neg_flow = layers.RescaleTransform(
-                rescale_factor, name="%s_neg_diffflow" % name
-            )(neg_flow)
+        # resize to final resolution
+        if int_steps > 0 and int_resolution > 1:
+            rescale_factor = inshape[0] / int_size[0]
+            pos_flow = layers.RescaleTransform(
+                rescale_factor, name="%s_diffflow" % name
+            )(pos_flow)
+            if bidir:
+                neg_flow = layers.RescaleTransform(
+                    rescale_factor, name="%s_neg_diffflow" % name
+                )(neg_flow)
 
         # warp image with flow field
         y_source = layers.SpatialTransformer(
@@ -281,7 +300,7 @@ class VxmDense(ne.modelio.LoadableModel):
         Returns a reconfigured model to predict only the final transform.
         """
 
-        return tf.keras.Model(self.inputs, self.references.pos_flow)
+    return tf.keras.Model(self.inputs, self.references.pos_flow)
 
     def register(self, src, trg):
         """
@@ -1453,15 +1472,4 @@ def _upsample_block(x, connection, factor=2, name=None):
     size = (factor,) * ndims if ndims > 1 else factor
     upsampled = UpSampling(size=size, name=name)(x)
     name = name + "_concat" if name else None
-
-    shape_delta = [
-        con_size - up_size
-        for con_size, up_size in zip(connection.shape[1:-1], upsampled.shape[1:-1])
-    ]
-    for delta in shape_delta:
-        assert (delta / 2).is_integer()
-
-    slc = (slice(None),) + tuple([slice(delta // 2, -delta // 2) for delta in shape_delta]) + (slice(None),)
-
-    return KL.concatenate([upsampled, connection[slc]], name=name)
-
+    return KL.concatenate([upsampled, connection], name=name)
