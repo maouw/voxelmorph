@@ -40,7 +40,7 @@ setup(
         "numpy",
         "scipy",
         "nibabel",
-        "neurite>=0.2",
+        "neurite @ git+ssh://git@github.com/ClandininLab/voxelmorph.git@006382381e0debed17ab9d2305b6ff30b0571690",
     ]
     + tensorflow,
 )
