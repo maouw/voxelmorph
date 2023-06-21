@@ -25,7 +25,7 @@ setup(
     description="Image Registration with Convolutional Networks",
     url="https://github.com/voxelmorph/voxelmorph",
     keywords=["deformation", "registration", "imaging", "cnn", "mri"],
-    packages=["voxelmorp"],
+    packages=["voxelmorph"],
     python_requires=">=3.6",
     classifiers=[
         "Intended Audience :: Science/Research",
