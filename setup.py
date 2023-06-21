@@ -40,7 +40,7 @@ setup(
         "numpy",
         "scipy",
         "nibabel",
-        "neurite @ git+ssh://git@github.com/ClandininLab/neurite.git@0b9b0901f5ec8626a1cbe21e5fbcaa17ae877f37",
+        "neurite @ git+https://github.com/ClandininLab/neurite.git@40f054e3dd45a5bcc47999b549e2e60e05eaf4ce",
     ]
     + tensorflow,
 )
