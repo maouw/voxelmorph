@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from pkg_resources import DistributionNotFound, get_distribution
-from setuptools import setup
+from setuptools import find_packages, setup
 
 
 def get_dist(package):
@@ -25,7 +25,7 @@ setup(
     description="Image Registration with Convolutional Networks",
     url="https://github.com/voxelmorph/voxelmorph",
     keywords=["deformation", "registration", "imaging", "cnn", "mri"],
-    packages=["voxelmorph"],
+    packages=find_packages(),
     python_requires=">=3.6",
     classifiers=[
         "Intended Audience :: Science/Research",
