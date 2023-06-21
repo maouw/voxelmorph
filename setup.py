@@ -1,26 +1,7 @@
 #!/usr/bin/env python
-import pathlib
-import re
 
-import setuptools
 from pkg_resources import DistributionNotFound, get_distribution
-
-setuptools.dist.Distribution().fetch_build_eggs(["packaging"])
-import packaging.version
-
-# base source directory
-base_dir = pathlib.Path(__file__).parent.resolve()
-
-# extract the current version
-init_file = base_dir.joinpath("voxelmorph/__init__.py")
-init_text = open(init_file, "rt").read()
-pattern = r"^__version__ = ['\"]([^'\"]*)['\"]"
-match = re.search(pattern, init_text, re.M)
-if not match:
-    raise RuntimeError(f"Unable to find __version__ in {init_file}.")
-version = match.group(1)
-if isinstance(packaging.version.parse(version), packaging.version.LegacyVersion):
-    raise RuntimeError(f"Invalid version string {version}.")
+from setuptools import setup
 
 
 def get_dist(package):
@@ -30,7 +11,6 @@ def get_dist(package):
         return None
 
 
-#
 tensorflow = []
 
 # don't install tensorflow if tensorflow-gpu is installed and vice versa
@@ -38,14 +18,14 @@ if get_dist("tensorflow") is None and get_dist("tensorflow-gpu") is None:
     tensorflow.append("tensorflow")
 
 # run setup
-setuptools.setup(
+setup(
     name="voxelmorph",
-    version=version,
+    version="0.1",
     license="Apache 2.0",
     description="Image Registration with Convolutional Networks",
     url="https://github.com/voxelmorph/voxelmorph",
     keywords=["deformation", "registration", "imaging", "cnn", "mri"],
-    packages=setuptools.find_packages(),
+    packages=["voxelmorp"],
     python_requires=">=3.6",
     classifiers=[
         "Intended Audience :: Science/Research",
